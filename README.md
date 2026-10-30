@@ -6,10 +6,10 @@
 
 ## 🖼️ ภาพตัวอย่างผลงานเรนเดอร์จริง (Visual Showcase)
 
-| 🤖 Stylized Mech Robot (Character + Rigging) | ☕ Reconstructed Coffee Mug (Image-to-3D) |
+| ☕ Reconstructed Coffee Mug (Image-to-3D) |
 | :---: | :---: |
-| ![Mech Robot](docs/images/mech_robot_preview.png) | ![Coffee Mug](docs/images/coffee_mug_preview.png) |
-| **3,312 Tris** · 16 Bones Rig · Calibrated Studio Light | **860 Tris** · Pure Quad Lathe · Ceramic & Liquid Shader |
+| ![Coffee Mug](docs/images/coffee_mug_preview.png) |
+| **860 Tris** · Pure Quad Lathe · Ceramic & Liquid Shader |
 
 ### 🔍 Stage C: Closed-Loop Blueprint Verification & Silhouette Overlay
 ![Blueprint Overlay](docs/images/blueprint_overlay.png)
