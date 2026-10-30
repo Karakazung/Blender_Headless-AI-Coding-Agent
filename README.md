@@ -4,6 +4,19 @@
 
 ---
 
+## 🖼️ ภาพตัวอย่างผลงานเรนเดอร์จริง (Visual Showcase)
+
+| 🤖 Stylized Mech Robot (Procedural Rigging) | ☕ Image-to-3D Reconstructed Coffee Mug |
+| :---: | :---: |
+| ![Mech Robot](docs/images/mech_robot_preview.png) | ![Coffee Mug](docs/images/coffee_mug_preview.png) |
+| **3,312 Tris** · 16 Bones Armature · Studio Light | **860 Tris** · Quad Lathe · Ceramic Glaze & Liquid |
+
+### 🔍 Stage C: Closed-Loop Blueprint Verification & Silhouette Overlay
+![Blueprint Overlay](docs/images/blueprint_overlay.png)
+> *การวิเคราะห์เปรียบเทียบความเที่ยงตรงของโครงร่าง (Silhouette Alignment): ภาพต้นฉบับ ➔ ภาพเรนเดอร์ 3D ➔ แมปการเหลื่อมทับ (สีเขียว = ส่วนที่ตรงกัน, สีแดง = ชิ้นส่วน 3D ที่ยื่นเกิน, สีน้ำเงิน = ส่วนที่ขาดหาย)*
+
+---
+
 ## 🚀 คุณสมบัติเด่น (Key Features)
 
 - **Pure Headless Execution**: รันสคริปต์ 3D เบื้องหลัง 100% โดยไม่ต้องเปิดหน้าต่าง GUI
@@ -36,6 +49,8 @@
 
 ```text
 Blender_Headless-AI-Coding-Agent/
+├── docs/
+│   └── images/                 # ภาพตัวอย่างผลงานเรนเดอร์และ Blueprint Verification Overlay
 ├── profiles/
 │   ├── lowpoly_prop.json       # โปรไฟล์สำหรับพร็อพเกมขนาดเล็ก
 │   ├── character.json          # โปรไฟล์สำหรับตัวละครและมาสคอต
