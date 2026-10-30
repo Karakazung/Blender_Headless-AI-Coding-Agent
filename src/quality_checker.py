@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Blender Headless QA Suite: Geometry & Scene Quality Checker
-Implements deterministic QA audits including:
+Blender Headless QA Suite: Geometry, Scene & Exposure Quality Checker
+Implements deterministic QA audits based on Capybala BPY engineering standards:
   1. AABB Fast-Path & BVH Mesh-level Interpenetration Audit (audit_interpenetration)
   2. Multi-point Raycast Floating & Submersion Audit (audit_floating)
-  3. Calibrated Exposure & Luma Distribution Audit (audit_exposure)
+  3. Surface-gap Attachment Contact Audit (audit_attachment_contact)
+  4. Array & Pattern Spacing Drift Audit (audit_spacing)
+  5. Calibrated Exposure & Luma Distribution Audit (audit_exposure)
 """
 
 import sys
+import os
 from typing import List, Dict, Any, Optional, Tuple
 
 try:
@@ -15,10 +18,71 @@ try:
     import mathutils
     from mathutils.bvhtree import BVHTree
 except ImportError:
-    # Allow importing type hints outside Blender environment
     bpy = None
     mathutils = None
     BVHTree = None
+
+try:
+    import numpy as np
+    from PIL import Image
+except ImportError:
+    np = None
+    Image = None
+
+# ==============================================================================
+# Exposure Preset Bands (§10.2 Exposure Standards)
+# ==============================================================================
+
+EXPOSURE_PRESET_BANDS: Dict[str, Dict[str, Any]] = {
+    "studio": {
+        "mean_min": 100.0,
+        "mean_max": 170.0,
+        "max_clipping_pct": 1.5,
+        "max_dark_pct": 35.0,
+        "description": "Studio backdrop with 3-point key/fill/rim lighting."
+    },
+    "outdoor_golden": {
+        "mean_min": 95.0,
+        "mean_max": 175.0,
+        "max_clipping_pct": 2.0,
+        "max_dark_pct": 30.0,
+        "description": "Natural daytime or golden hour lighting."
+    },
+    "night": {
+        "mean_min": 15.0,
+        "mean_max": 70.0,
+        "max_clipping_pct": 2.5,
+        "max_dark_pct": 55.0,
+        "max_mean_median_diff": 18.0,
+        "description": "Night scene with focused accent lights and subtle ambient fill."
+    },
+    "space": {
+        "mean_min": 5.0,
+        "mean_max": 60.0,
+        "max_clipping_pct": 1.5,
+        "max_dark_pct": 92.0,
+        "description": "High contrast deep space / vacuum lighting."
+    }
+}
+
+# ==============================================================================
+# Helper Tags & Assembly Markers
+# ==============================================================================
+
+def mark_assembly_mate(obj_a, obj_b):
+    """ทำเครื่องหมายยกเว้นการตรวจสอบการชนสำหรับชิ้นส่วนที่สวมประกบกันตามธรรมชาติ"""
+    obj_a["_mate_with"] = obj_b.name
+    obj_b["_mate_with"] = obj_a.name
+
+def mark_side_attached(obj, host_obj):
+    """ทำเครื่องหมายชิ้นส่วนที่ยึดติดผนัง/ด้านข้างของวัตถุแม่ (เช่น ป้าย, สวิตช์ไฟ)"""
+    obj["_side_attached"] = True
+    obj["_host_object"] = host_obj.name if hasattr(host_obj, "name") else str(host_obj)
+
+def mark_joint_attached(obj, host_obj):
+    """ทำเครื่องหมายชิ้นส่วนข้อต่อ/เพลาหมุนที่ประกบกับวัตถุแม่ (เช่น ลูกปืน, ดุมล้อ)"""
+    obj["_joint_attached"] = True
+    obj["_host_object"] = host_obj.name if hasattr(host_obj, "name") else str(host_obj)
 
 # ==============================================================================
 # 1. Geometry Helpers
@@ -165,7 +229,7 @@ def audit_floating(
     probe_offset = 0.005
     
     for obj in objects:
-        # ข้ามวัตถุที่มีการประกาศข้อยกเว้นทางวิศวกรรม
+        # ข้ามวัตถุที่ยึดติดด้านข้าง/ข้อต่อ (ตรวจสอบแยกใน audit_attachment_contact)
         if obj.get("_side_attached", False) or obj.get("_joint_attached", False):
             continue
             
@@ -228,7 +292,95 @@ def audit_floating(
     return floating_issues
 
 # ==============================================================================
-# 4. Spacing & Pattern Drift Audit (ตรวจจับระยะห่างในแถวที่คลาดเคลื่อน)
+# 4. Attachment Contact Audit (§13.9 Attachment Contact Audit)
+# ==============================================================================
+
+def audit_attachment_contact(
+    objects: Optional[List[Any]] = None,
+    max_gap: float = 0.005
+) -> List[Dict[str, Any]]:
+    """
+    ตรวจสอบระยะแนบสนิท (Surface-gap check) ของชิ้นส่วนที่ติดกับวัตถุแม่
+    (สำหรับวัตถุที่ติดป้าย _side_attached หรือ _joint_attached)
+    :param objects: รายการวัตถุที่ต้องการตรวจสอบ (หาก None จะตรวจค้นวัตถุที่มี Tag ทั้งหมดในฉาก)
+    :param max_gap: ระยะห่างสูงสุดที่ยอมรับได้ (เมตร) ค่าเริ่มต้น 5 มม.
+    """
+    if bpy is None:
+        raise RuntimeError("Blender bpy module is required to execute audit_attachment_contact.")
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    
+    if objects is None:
+        objects = [
+            o for o in bpy.context.scene.objects 
+            if o.type == 'MESH' and (o.get("_side_attached", False) or o.get("_joint_attached", False))
+        ]
+
+    attachment_issues = []
+
+    for obj in objects:
+        host_name = obj.get("_host_object")
+        if not host_name:
+            attachment_issues.append({
+                "object": obj.name,
+                "status": "FAIL_MISSING_HOST_REFERENCE",
+                "message": "Object is marked attached but has no _host_object defined"
+            })
+            continue
+
+        host_obj = bpy.data.objects.get(host_name)
+        if not host_obj:
+            attachment_issues.append({
+                "object": obj.name,
+                "host": host_name,
+                "status": "FAIL_HOST_NOT_FOUND"
+            })
+            continue
+
+        # ยิง Raycast ระหว่างจุดกึ่งกลางของ Bounding box ของวัตถุ ไปยัง Bounding box ของ Host
+        obj_center = obj.matrix_world.translation
+        host_center = host_obj.matrix_world.translation
+        ray_dir = (host_center - obj_center).normalized()
+        
+        # Raycast เข้าหาพื้นผิว Host Mesh ด้วย BVHTree
+        bvh_host = BVHTree.FromObject(host_obj, depsgraph)
+        inv_matrix_host = host_obj.matrix_world.inverted()
+        local_origin = inv_matrix_host @ obj_center
+        local_dir = inv_matrix_host.to_3x3() @ ray_dir
+        
+        loc, normal, index, dist = bvh_host.ray_cast(local_origin, local_dir)
+        
+        if loc is not None:
+            world_hit = host_obj.matrix_world @ loc
+            # คำนวณระยะห่างผิวสัมผัสขั้นต่ำ
+            # หักลบด้วยขอบเขตวัตถุตัวมันเองคร่าวๆ ตามแนวรัศมี
+            obj_min, obj_max = get_world_aabb(obj)
+            approx_radius = (obj_max - obj_min).length / 2.0
+            surface_gap = max(0.0, (world_hit - obj_center).length - approx_radius)
+
+            if surface_gap > max_gap:
+                attachment_issues.append({
+                    "object": obj.name,
+                    "host": host_name,
+                    "measured_surface_gap": round(surface_gap, 4),
+                    "allowed_max_gap": max_gap,
+                    "status": "FAIL_ATTACHMENT_GAP_EXCEEDED"
+                })
+        else:
+            # ตรวจสอบ AABB Distance สำรอง
+            min_a, max_a = get_world_aabb(obj)
+            min_b, max_b = get_world_aabb(host_obj)
+            if not aabb_intersect(min_a, max_a, min_b, max_b, tolerance=max_gap):
+                attachment_issues.append({
+                    "object": obj.name,
+                    "host": host_name,
+                    "status": "FAIL_NO_CONTACT_RAY_HIT"
+                })
+
+    return attachment_issues
+
+# ==============================================================================
+# 5. Spacing & Pattern Drift Audit (ตรวจจับระยะห่างในแถวที่คลาดเคลื่อน)
 # ==============================================================================
 
 def audit_spacing(
@@ -298,16 +450,155 @@ def audit_spacing(
     }
 
 # ==============================================================================
-# 5. Batch Quality Runner
+# 6. Exposure & Luma Distribution Audit (§10.2 Calibrated Luma Bands)
 # ==============================================================================
 
-def run_full_qa_audit(array_groups: Optional[Dict[str, List[Any]]] = None) -> Dict[str, Any]:
+def compute_luma_from_rgb(rgb_array: Any) -> Any:
     """
-    รันการตรวจสอบคุณภาพเชิงเรขาคณิตทั้งหมด (Interpenetration, Floating, Spacing)
-    :param array_groups: ดิกชันนารีของกลุ่มวัตถุที่จัดเรียงเป็นอาเรย์ เช่น {"balcony_rails": [obj1, obj2, ...]}
+    คำนวณค่า Luma (ความสว่าง) จากช่องสี RGB ตามมาตรฐาน Rec. 709
+    Y = 0.2126 * R + 0.7152 * G + 0.0722 * B
     """
-    interpenetrations = audit_interpenetration()
-    floating = audit_floating()
+    if np is None:
+        raise RuntimeError("numpy module is required to compute luma statistics.")
+    
+    # rgb_array should be shaped (..., 3) in range [0, 255]
+    weights = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    return np.tensordot(rgb_array[..., :3], weights, axes=([ -1 ], [ 0 ]))
+
+def audit_exposure(
+    image_filepath: str,
+    preset: str = "studio",
+    custom_band: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    ตรวจสอบค่าการรับแสงและการกระจายตัวของ Luma จากภาพเรนเดอร์เทียบกับพรีเซ็ต
+    :param image_filepath: เส้นทางไฟล์ภาพเรนเดอร์ (.png, .jpg, .exr)
+    :param preset: พรีเซ็ตแสงเป้าหมาย ('studio', 'outdoor_golden', 'night', 'space')
+    :param custom_band: กำหนดช่วงความสว่างเฉพาะกิจ (ถ้ามี)
+    """
+    if preset not in EXPOSURE_PRESET_BANDS and custom_band is None:
+        raise ValueError(f"Unknown preset: '{preset}'. Available: {list(EXPOSURE_PRESET_BANDS.keys())}")
+
+    band = custom_band if custom_band else EXPOSURE_PRESET_BANDS[preset]
+
+    # โหลดพิกเซลภาพ
+    rgb_data = None
+    if bpy is not None:
+        try:
+            img = bpy.data.images.load(image_filepath)
+            width, height = img.size
+            total_pixels = width * height
+            raw_pixels = np.empty(total_pixels * img.channels, dtype=np.float32)
+            img.pixels.foreach_get(raw_pixels)
+            raw_pixels = raw_pixels.reshape((height, width, img.channels))
+            # สเกลเป็น [0, 255]
+            rgb_data = (raw_pixels[:, :, :3] * 255.0).clip(0, 255)
+            # เคลียร์หน่วยความจำภาพใน bpy
+            bpy.data.images.remove(img)
+        except Exception:
+            rgb_data = None
+
+    # สแตนด์อโลน fallback โหลดผ่าน PIL
+    if rgb_data is None:
+        if not os.path.exists(image_filepath):
+            raise FileNotFoundError(f"Rendered image file not found: {image_filepath}")
+        if Image is None or np is None:
+            raise RuntimeError("PIL (Pillow) and numpy are required to audit exposure outside Blender.")
+        img = Image.open(image_filepath).convert("RGB")
+        rgb_data = np.array(img, dtype=np.float32)
+
+    luma = compute_luma_from_rgb(rgb_data)
+    total_pixels = luma.size
+
+    mean_luma = float(np.mean(luma))
+    median_luma = float(np.median(luma))
+    min_luma = float(np.min(luma))
+    max_luma = float(np.max(luma))
+
+    # คำนวณร้อยละของพื้นที่ตัดยอด (Clipping >= 250) และพื้นที่มืดสนิท (Dark <= 15)
+    clipping_count = int(np.count_nonzero(luma >= 250.0))
+    dark_count = int(np.count_nonzero(luma <= 15.0))
+
+    clipping_pct = (clipping_count / total_pixels) * 100.0
+    dark_pct = (dark_count / total_pixels) * 100.0
+
+    issues = []
+    recommendations = []
+
+    # 1. ตรวจสอบ Mean Luma ให้อยู่ในช่วงมาตรฐาน
+    mean_min = band["mean_min"]
+    mean_max = band["mean_max"]
+    if mean_luma < mean_min:
+        issues.append(f"UNDER_EXPOSED: Mean luma {mean_luma:.1f} is below minimum {mean_min:.1f}")
+        recommendations.append("Increase Key Light wattage or adjust camera exposure/ISO.")
+    elif mean_luma > mean_max:
+        issues.append(f"OVER_EXPOSED: Mean luma {mean_luma:.1f} exceeds maximum {mean_max:.1f}")
+        recommendations.append("Reduce Key/Fill Light power or increase camera F-stop.")
+
+    # 2. ตรวจสอบพื้นที่ตัดยอด (Clipping)
+    max_clipping = band.get("max_clipping_pct", 1.5)
+    if clipping_pct > max_clipping:
+        issues.append(f"SPECULAR_BURNOUT: Clipping {clipping_pct:.2f}% exceeds limit {max_clipping:.2f}%")
+        recommendations.append("Dim bright area lamps or reduce specular roughness on blown-out materials.")
+
+    # 3. ตรวจสอบพื้นที่มืดทึบ (Crushed Blacks)
+    max_dark = band.get("max_dark_pct", 35.0)
+    if dark_pct > max_dark:
+        issues.append(f"EXCESSIVE_DARKNESS: Dark area {dark_pct:.1f}% exceeds limit {max_dark:.1f}%")
+        recommendations.append("Add subtle Fill light or increase ambient bounce.")
+
+    # 4. ตรวจสอบ Hotspot Drift สำหรับฉากกลางคืน (§10.2 กฎเหล็กข้อ 4)
+    if preset == "night":
+        max_diff = band.get("max_mean_median_diff", 18.0)
+        diff = abs(mean_luma - median_luma)
+        if diff > max_diff and dark_pct > 40.0:
+            issues.append(f"HOTSPOT_DRIFT: |Mean - Median| is {diff:.1f} (> {max_diff:.1f}) with {dark_pct:.1f}% dark pixels")
+            recommendations.append("Scene is dominated by tiny intense pinpoint lights. Call auto_night_fill() to add low ambient scene illumination.")
+
+    status = "PASS" if len(issues) == 0 else "FAIL_EXPOSURE_DRIFT"
+
+    return {
+        "status": status,
+        "preset": preset,
+        "mean_luma": round(mean_luma, 2),
+        "median_luma": round(median_luma, 2),
+        "min_luma": round(min_luma, 2),
+        "max_luma": round(max_luma, 2),
+        "clipping_pct": round(clipping_pct, 2),
+        "dark_pct": round(dark_pct, 2),
+        "target_band": {
+            "mean_min": mean_min,
+            "mean_max": mean_max,
+            "max_clipping_pct": max_clipping,
+            "max_dark_pct": max_dark
+        },
+        "issues": issues,
+        "recommendations": recommendations
+    }
+
+# ==============================================================================
+# 7. Comprehensive Master QA Runner
+# ==============================================================================
+
+def run_full_qa_audit(
+    render_image_path: Optional[str] = None,
+    preset: str = "studio",
+    array_groups: Optional[Dict[str, List[Any]]] = None
+) -> Dict[str, Any]:
+    """
+    รันการตรวจสอบคุณภาพรอบด้าน (Geometry, Attachment, Spacing, Exposure)
+    :param render_image_path: เส้นทางรูปภาพเรนเดอร์สำหรับการตรวจสอบแสง (Optional)
+    :param preset: พรีเซ็ตการจัดแสงสำหรับการตรวจสอบ Luma ('studio', 'outdoor_golden', 'night', 'space')
+    :param array_groups: ดิกชันนารีของกลุ่มวัตถุที่จัดเรียงเป็นอาเรย์
+    """
+    interpenetrations = []
+    floating = []
+    attachments = []
+
+    if bpy is not None:
+        interpenetrations = audit_interpenetration()
+        floating = audit_floating()
+        attachments = audit_attachment_contact()
     
     spacing_reports = {}
     spacing_passed = True
@@ -318,17 +609,34 @@ def run_full_qa_audit(array_groups: Optional[Dict[str, List[Any]]] = None) -> Di
             if rep["status"] != "PASS":
                 spacing_passed = False
 
-    passed = (len(interpenetrations) == 0) and (len(floating) == 0) and spacing_passed
+    exposure_report = None
+    exposure_passed = True
+    if render_image_path:
+        exposure_report = audit_exposure(render_image_path, preset=preset)
+        if exposure_report["status"] != "PASS":
+            exposure_passed = False
+
+    passed = (
+        (len(interpenetrations) == 0) and 
+        (len(floating) == 0) and 
+        (len(attachments) == 0) and 
+        spacing_passed and 
+        exposure_passed
+    )
 
     report = {
         "qa_passed": passed,
         "interpenetration_issues": interpenetrations,
         "floating_issues": floating,
+        "attachment_issues": attachments,
         "spacing_issues": spacing_reports,
+        "exposure_audit": exposure_report,
         "summary": {
             "total_collisions": len(interpenetrations),
             "total_floating": len(floating),
-            "total_spacing_groups_checked": len(array_groups) if array_groups else 0
+            "total_attachment_issues": len(attachments),
+            "total_spacing_groups_checked": len(array_groups) if array_groups else 0,
+            "exposure_audited": render_image_path is not None
         }
     }
     return report
@@ -338,4 +646,3 @@ if __name__ == "__main__":
         res = run_full_qa_audit()
         import json
         print("GEOMETRY_QA_REPORT:" + json.dumps(res, indent=2, ensure_ascii=False))
-
