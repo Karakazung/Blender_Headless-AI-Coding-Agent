@@ -139,3 +139,4 @@ def build_scene(out_dir: str):
 if __name__ == "__main__":
     args = parse_args()
     build_scene(args.out_dir)
+

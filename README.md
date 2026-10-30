@@ -52,3 +52,4 @@ powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 -Script script
 - Cycles GPU/CPU thread safety cap: `threads=6`
 - Zero Z-fighting & Non-manifold geometric guarantees
 - Calibrated exposure bands (Studio: 100–170, Outdoor: 95–175, Night: 15–70)
+

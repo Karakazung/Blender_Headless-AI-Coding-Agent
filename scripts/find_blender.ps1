@@ -73,3 +73,4 @@ foreach ($pattern in $commonGlobs) {
 # 6. Fallback Exit 1
 Write-Error "BLENDER_NOT_FOUND: All 6 cascade levels failed. Please specify blender.exe path manually in $CacheFile."
 exit 1
+
