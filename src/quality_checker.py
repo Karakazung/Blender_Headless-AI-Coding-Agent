@@ -228,23 +228,107 @@ def audit_floating(
     return floating_issues
 
 # ==============================================================================
-# 4. Batch Quality Runner
+# 4. Spacing & Pattern Drift Audit (ตรวจจับระยะห่างในแถวที่คลาดเคลื่อน)
 # ==============================================================================
 
-def run_full_qa_audit() -> Dict[str, Any]:
-    """รันการตรวจสอบคุณภาพเชิงเรขาคณิตทั้งหมดและสรุปรายงานผล"""
+def audit_spacing(
+    object_group: List[Any],
+    expected_axis: str = 'X',
+    tolerance_ratio: float = 0.05,
+    min_drift_threshold: float = 0.001
+) -> Dict[str, Any]:
+    """
+    ตรวจสอบระยะห่างของแถววัตถุ (Array/Pattern) ว่าเท่ากันอย่างสม่ำเสมอหรือไม่
+    :param object_group: รายชื่อวัตถุในแถวเดียวกัน
+    :param expected_axis: แกนหลักของการเรียงตัว ('X', 'Y', หรือ 'Z')
+    :param tolerance_ratio: อัตราส่วนความคลาดเคลื่อนที่ยอมรับได้ (เช่น 0.05 = 5% ของระยะมัธยฐาน)
+    :param min_drift_threshold: เกณฑ์คลาดเคลื่อนขั้นต่ำเป็นเมตร (สำหรับวัตถุขนาดเล็ก ป้องกันเกณฑ์เข้มงวดเกินไป)
+    """
+    if len(object_group) < 3:
+        return {
+            "status": "PASS",
+            "message": "ชิ้นส่วนน้อยกว่า 3 ชิ้น ไม่ต้องตรวจวัด Pattern สม่ำเสมอ"
+        }
+
+    # 1. เรียงลำดับวัตถุตามแกนหลักที่กำหนด
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(expected_axis.upper(), 0)
+    sorted_objs = sorted(object_group, key=lambda o: o.matrix_world.translation[axis_idx])
+
+    # 2. คำนวณระยะห่างระหว่างวัตถุที่อยู่ติดกันทีละคู่
+    spacings = []
+    for i in range(len(sorted_objs) - 1):
+        p1 = sorted_objs[i].matrix_world.translation
+        p2 = sorted_objs[i+1].matrix_world.translation
+        dist = (p2 - p1).length
+        spacings.append((sorted_objs[i].name, sorted_objs[i+1].name, dist))
+
+    # 3. คำนวณค่ามัธยฐาน (Median Spacing) เพื่อใช้เป็นเกณฑ์อ้างอิง
+    distances = [s[2] for s in spacings]
+    sorted_distances = sorted(distances)
+    median_spacing = sorted_distances[len(sorted_distances) // 2]
+
+    # คำนวณ Adaptive Tolerance
+    allowed_drift = max(median_spacing * tolerance_ratio, min_drift_threshold)
+
+    drifted_items = []
+    for obj_a, obj_b, dist in spacings:
+        diff = abs(dist - median_spacing)
+        if diff > allowed_drift:
+            drifted_items.append({
+                "pair": (obj_a, obj_b),
+                "measured_distance": round(dist, 4),
+                "expected_distance": round(median_spacing, 4),
+                "diff": round(diff, 4),
+                "allowed_drift": round(allowed_drift, 4)
+            })
+
+    # 4. รายงานผลลัพธ์
+    if drifted_items:
+        return {
+            "status": "FAIL_SPACING_DRIFT",
+            "median_spacing": round(median_spacing, 4),
+            "drift_count": len(drifted_items),
+            "details": drifted_items
+        }
+
+    return {
+        "status": "PASS",
+        "median_spacing": round(median_spacing, 4),
+        "total_checked_pairs": len(spacings)
+    }
+
+# ==============================================================================
+# 5. Batch Quality Runner
+# ==============================================================================
+
+def run_full_qa_audit(array_groups: Optional[Dict[str, List[Any]]] = None) -> Dict[str, Any]:
+    """
+    รันการตรวจสอบคุณภาพเชิงเรขาคณิตทั้งหมด (Interpenetration, Floating, Spacing)
+    :param array_groups: ดิกชันนารีของกลุ่มวัตถุที่จัดเรียงเป็นอาเรย์ เช่น {"balcony_rails": [obj1, obj2, ...]}
+    """
     interpenetrations = audit_interpenetration()
     floating = audit_floating()
     
-    passed = (len(interpenetrations) == 0) and (len(floating) == 0)
-    
+    spacing_reports = {}
+    spacing_passed = True
+    if array_groups:
+        for group_name, objs in array_groups.items():
+            rep = audit_spacing(objs)
+            spacing_reports[group_name] = rep
+            if rep["status"] != "PASS":
+                spacing_passed = False
+
+    passed = (len(interpenetrations) == 0) and (len(floating) == 0) and spacing_passed
+
     report = {
         "qa_passed": passed,
         "interpenetration_issues": interpenetrations,
         "floating_issues": floating,
+        "spacing_issues": spacing_reports,
         "summary": {
             "total_collisions": len(interpenetrations),
-            "total_floating": len(floating)
+            "total_floating": len(floating),
+            "total_spacing_groups_checked": len(array_groups) if array_groups else 0
         }
     }
     return report
@@ -254,3 +338,4 @@ if __name__ == "__main__":
         res = run_full_qa_audit()
         import json
         print("GEOMETRY_QA_REPORT:" + json.dumps(res, indent=2, ensure_ascii=False))
+
