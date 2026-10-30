@@ -7,8 +7,9 @@
 ## 🖼️ ภาพตัวอย่างผลงานเรนเดอร์จริง (Visual Showcase)
 
 | ☕ Reconstructed Coffee Mug (Image-to-3D) |
-| :---: | :---: |
+
 | ![Coffee Mug](docs/images/coffee_mug_preview.png) |
+
 | **860 Tris** · Pure Quad Lathe · Ceramic & Liquid Shader |
 
 ### 🔍 Stage C: Closed-Loop Blueprint Verification & Silhouette Overlay
