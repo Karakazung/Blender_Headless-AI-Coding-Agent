@@ -90,8 +90,18 @@ EXPOSURE_PRESET_BANDS: Dict[str, Dict[str, Any]] = {
 
 def mark_assembly_mate(obj_a, obj_b):
     """ทำเครื่องหมายยกเว้นการตรวจสอบการชนสำหรับชิ้นส่วนที่สวมประกบกันตามธรรมชาติ"""
-    obj_a["_mate_with"] = obj_b.name if hasattr(obj_b, "name") else str(obj_b)
-    obj_b["_mate_with"] = obj_a.name if hasattr(obj_a, "name") else str(obj_a)
+    name_a = obj_a.name if hasattr(obj_a, "name") else str(obj_a)
+    name_b = obj_b.name if hasattr(obj_b, "name") else str(obj_b)
+    obj_a["_mate_with"] = name_b
+    obj_b["_mate_with"] = name_a
+
+    mates_a = set(filter(None, str(obj_a.get("_mates_list", "")).split(",")))
+    mates_a.add(name_b)
+    obj_a["_mates_list"] = ",".join(sorted(mates_a))
+
+    mates_b = set(filter(None, str(obj_b.get("_mates_list", "")).split(",")))
+    mates_b.add(name_a)
+    obj_b["_mates_list"] = ",".join(sorted(mates_b))
 
 def mark_side_attached(obj, host_obj):
     """ทำเครื่องหมายชิ้นส่วนที่ยึดติดผนัง/ด้านข้างของวัตถุแม่ (เช่น ป้าย, สวิตช์ไฟ)"""
@@ -429,8 +439,18 @@ def audit_interpenetration(
             if any(k in obj_a.name for k in ("Ground", "Floor", "Terrain")) or any(k in obj_b.name for k in ("Ground", "Floor", "Terrain")):
                 continue
 
-            # ตรวจสอบข้อยกเว้นการประกอบกันโดยตั้งใจ (Assembly Mate)
-            if obj_a.get("_mate_with") == obj_b.name or obj_b.get("_mate_with") == obj_a.name:
+            # ตรวจสอบข้อยกเว้นการประกอบกันโดยตั้งใจ (Assembly Mate หรืออยู่ภายใต้ Armature เดียวกัน)
+            mates_a = set(filter(None, str(obj_a.get("_mates_list", "")).split(",")))
+            mates_b = set(filter(None, str(obj_b.get("_mates_list", "")).split(",")))
+            if (obj_a.get("_mate_with") == obj_b.name or 
+                obj_b.get("_mate_with") == obj_a.name or
+                obj_b.name in mates_a or 
+                obj_a.name in mates_b):
+                continue
+
+            parent_a = getattr(obj_a, "parent", None)
+            parent_b = getattr(obj_b, "parent", None)
+            if parent_a is not None and parent_a == parent_b and getattr(parent_a, "type", None) == 'ARMATURE':
                 continue
 
             min_b, max_b = get_world_aabb(obj_b)

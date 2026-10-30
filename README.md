@@ -6,10 +6,10 @@
 
 ## 🖼️ ภาพตัวอย่างผลงานเรนเดอร์จริง (Visual Showcase)
 
-| 🤖 Stylized Mech Robot (Procedural Rigging) | ☕ Image-to-3D Reconstructed Coffee Mug |
-| :---: | :---: |
-| ![Mech Robot](docs/images/mech_robot_preview.png) | ![Coffee Mug](docs/images/coffee_mug_preview.png) |
-| **3,312 Tris** · 16 Bones Armature · Studio Light | **860 Tris** · Quad Lathe · Ceramic Glaze & Liquid |
+| 🤖 Stylized Mech Robot | 🐺 Anime Character (Silver Wolf) | ☕ Reconstructed Coffee Mug |
+| :---: | :---: | :---: |
+| ![Mech Robot](docs/images/mech_robot_preview.png) | ![Silver Wolf](docs/images/silverwolf_preview.png) | ![Coffee Mug](docs/images/coffee_mug_preview.png) |
+| **3,312 Tris** · 16 Bones Rig · Studio Light | **3,532 Tris** · 18 Bones Rig · Spiral Hair & Props | **860 Tris** · Quad Lathe · Ceramic & Liquid |
 
 ### 🔍 Stage C: Closed-Loop Blueprint Verification & Silhouette Overlay
 ![Blueprint Overlay](docs/images/blueprint_overlay.png)
@@ -61,6 +61,7 @@ Blender_Headless-AI-Coding-Agent/
 │   ├── run_headless.ps1        # สคริปต์รันคำสั่ง Headless CLI มาตรฐาน
 │   ├── template_worker.py      # ตัวอย่าง BPY Worker สคริปต์แบบ Profile-driven
 │   ├── build_mech_robot.py     # ตัวอย่างการสร้าง Mech Robot พร้อม Armature Rigging
+│   ├── build_silverwolf_character.py # การสร้างตัวละคร Anime (Silver Wolf) พร้อมเกลียวผมและ Self-Correction Loop
 │   └── build_from_reference.py # สคริปต์สร้างโมเดลจากภาพอ้างอิงและวัดผล IoU
 ├── src/
 │   ├── profile_loader.py       # ระบบโหลดและรวมค่า Profile มาตรฐาน
