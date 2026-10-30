@@ -8,12 +8,14 @@
 
 | ☕ Reconstructed Coffee Mug (Image-to-3D) |
 
-| ![Coffee Mug](docs/images/coffee_mug_preview.png) |
+![Coffee Mug](docs/images/coffee_mug_preview.png)
 
 | **860 Tris** · Pure Quad Lathe · Ceramic & Liquid Shader |
 
 ### 🔍 Stage C: Closed-Loop Blueprint Verification & Silhouette Overlay
+
 ![Blueprint Overlay](docs/images/blueprint_overlay.png)
+
 > *การวิเคราะห์เปรียบเทียบความเที่ยงตรงของโครงร่าง (Silhouette Alignment): ภาพต้นฉบับ ➔ ภาพเรนเดอร์ 3D ➔ แมปการเหลื่อมทับ (สีเขียว = ส่วนที่ตรงกัน, สีแดง = ชิ้นส่วน 3D ที่ยื่นเกิน, สีน้ำเงิน = ส่วนที่ขาดหาย)*
 
 ---
