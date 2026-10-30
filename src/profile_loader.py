@@ -91,3 +91,4 @@ if __name__ == "__main__":
     for p_name in profiles:
         loaded = load_profile(p_name)
         print(f"[{p_name}] max_tris={loaded['polycount_budget']['max_tris']}, preset={loaded['exposure_preset']}")
+

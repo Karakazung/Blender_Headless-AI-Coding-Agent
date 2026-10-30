@@ -7,7 +7,8 @@ param(
     [string]$Script = "",
     [string]$PythonExpr = "",
     [switch]$Probe = $false,
-    [string]$OutDir = "out"
+    [string]$OutDir = "out",
+    [string[]]$ScriptArgs = @()
 )
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -25,9 +26,10 @@ if ($LASTEXITCODE -ne 0) {
 $blenderExe = ($blenderPathOutput -split "=")[1].Trim()
 Write-Host "[+] Using Blender executable: $blenderExe"
 
-# Ensure output directory exists
-if (-not (Test-Path $OutDir)) {
-    New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+# Ensure output directory exists and is absolute
+$absOutDir = if ([System.IO.Path]::IsPathRooted($OutDir)) { $OutDir } else { [System.IO.Path]::GetFullPath($OutDir) }
+if (-not (Test-Path $absOutDir)) {
+    New-Item -ItemType Directory -Path $absOutDir -Force | Out-Null
 }
 
 # 1. Probe Mode
@@ -50,8 +52,14 @@ if ($Script) {
         Write-Error "Script file not found: $Script"
         exit 1
     }
-    Write-Host "[*] Executing Headless Script: $Script"
-    & $blenderExe --background --python $Script -- --out-dir $OutDir
+    $absScript = [System.IO.Path]::GetFullPath($Script)
+    Write-Host "[*] Executing Headless Script: $absScript"
+    
+    $forwardArgs = @("--out-dir", $absOutDir)
+    if ($ScriptArgs.Count -gt 0) {
+        $forwardArgs += $ScriptArgs
+    }
+    & $blenderExe --background --python $absScript -- @forwardArgs
     exit $LASTEXITCODE
 }
 

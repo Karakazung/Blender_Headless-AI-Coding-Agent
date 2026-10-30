@@ -55,7 +55,10 @@ foreach ($rk in $regKeys) {
 $commonGlobs = @(
     "C:\Program Files\Blender Foundation\Blender *\blender.exe",
     "C:\Program Files\Steam\steamapps\common\Blender\blender.exe",
+    "C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe",
+    "D:\Games\Steam\steamapps\common\Blender\blender.exe",
     "D:\SteamLibrary\steamapps\common\Blender\blender.exe",
+    "D:\Steam\steamapps\common\Blender\blender.exe",
     "D:\Blender*\blender.exe",
     "$env:LOCALAPPDATA\Programs\Blender Foundation\Blender *\blender.exe"
 )

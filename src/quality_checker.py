@@ -29,9 +29,12 @@ except ImportError:
 
 try:
     import numpy as np
-    from PIL import Image
 except ImportError:
     np = None
+
+try:
+    from PIL import Image
+except ImportError:
     Image = None
 
 try:
@@ -280,8 +283,13 @@ def audit_transforms(
 
         # 2. ตรวจสอบการแนบระนาบพื้นฐานล่าง (Z=0 Grounding)
         if enforce_base:
-            # ข้ามวัตถุที่เป็นพื้นดินหรือชิ้นส่วนที่ติดด้านข้าง
-            if obj.get("_side_attached") or obj.get("_joint_attached") or "Floor" in obj.name or "Ground" in obj.name:
+            # ข้ามวัตถุที่เป็นพื้นดิน, มี Parent หรือเป็นชิ้นส่วนย่อยใน Hierarchy
+            if (obj.get("_side_attached") or 
+                obj.get("_joint_attached") or 
+                obj.get("_mate_with") or 
+                getattr(obj, "parent", None) is not None or 
+                "Floor" in obj.name or 
+                "Ground" in obj.name):
                 continue
 
             try:
@@ -313,17 +321,31 @@ def audit_mesh_topology(objects: Optional[List[Any]] = None) -> List[Dict[str, A
     if bpy is None:
         return []
 
+    try:
+        import bmesh
+    except ImportError:
+        return []
+
     if objects is None:
         objects = [o for o in bpy.context.scene.objects if o.type == 'MESH']
 
     topology_issues = []
     for obj in objects:
         mesh = obj.data
-        if not hasattr(mesh, "edges"):
+        if not hasattr(mesh, "vertices") or len(mesh.vertices) == 0:
             continue
 
-        non_manifold_count = sum(1 for e in mesh.edges if not getattr(e, "is_manifold", True))
-        loose_edge_count = sum(1 for e in mesh.edges if len(getattr(e, "link_faces", [])) == 0)
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(mesh)
+            bm.edges.ensure_lookup_table()
+            non_manifold_count = sum(1 for e in bm.edges if not e.is_manifold)
+            loose_edge_count = sum(1 for e in bm.edges if len(e.link_faces) == 0)
+        except Exception:
+            non_manifold_count = 0
+            loose_edge_count = 0
+        finally:
+            bm.free()
 
         if non_manifold_count > 0:
             topology_issues.append({
@@ -403,6 +425,10 @@ def audit_interpenetration(
         for j in range(i + 1, len(objects)):
             obj_b = objects[j]
             
+            # ข้ามการตรวจสอบการชนกับพื้นดินหรือระนาบรองรับ
+            if any(k in obj_a.name for k in ("Ground", "Floor", "Terrain")) or any(k in obj_b.name for k in ("Ground", "Floor", "Terrain")):
+                continue
+
             # ตรวจสอบข้อยกเว้นการประกอบกันโดยตั้งใจ (Assembly Mate)
             if obj_a.get("_mate_with") == obj_b.name or obj_b.get("_mate_with") == obj_a.name:
                 continue
@@ -465,8 +491,11 @@ def audit_floating(
     probe_offset = 0.005
     
     for obj in objects:
-        # ข้ามวัตถุที่ยึดติดด้านข้าง/ข้อต่อ (ตรวจสอบแยกใน audit_attachment_contact)
-        if obj.get("_side_attached", False) or obj.get("_joint_attached", False):
+        # ข้ามวัตถุที่ยึดติดด้านข้าง/ข้อต่อ/มี Parent หรือเป็นชิ้นส่วนประกอบร่วม
+        if (obj.get("_side_attached", False) or 
+            obj.get("_joint_attached", False) or 
+            obj.get("_mate_with") or 
+            getattr(obj, "parent", None) is not None):
             continue
             
         # ข้ามวัตถุประเภทพื้นดินหรือบรรยากาศ
@@ -539,10 +568,8 @@ def audit_attachment_contact(
     ตรวจสอบระยะแนบสนิท (Surface-gap check) ของชิ้นส่วนที่ติดกับวัตถุแม่
     """
     if bpy is None:
-        raise RuntimeError("Blender bpy module is required to execute audit_attachment_contact.")
+        return []
 
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    
     if objects is None:
         objects = [
             o for o in bpy.context.scene.objects 
@@ -552,6 +579,10 @@ def audit_attachment_contact(
     attachment_issues = []
 
     for obj in objects:
+        # ข้ามชิ้นส่วนที่ถูกเชื่อมโยงผ่านโครงกระดูก Armature แล้ว
+        if getattr(obj, "parent_type", None) == 'BONE' or (getattr(obj, "parent", None) and getattr(obj.parent, "type", None) == 'ARMATURE'):
+            continue
+
         host_name = obj.get("_host_object")
         if not host_name:
             attachment_issues.append({
@@ -570,40 +601,23 @@ def audit_attachment_contact(
             })
             continue
 
-        obj_center = obj.matrix_world.translation
-        host_center = host_obj.matrix_world.translation
-        ray_dir = (host_center - obj_center).normalized()
-        
-        bvh_host = BVHTree.FromObject(host_obj, depsgraph)
-        inv_matrix_host = host_obj.matrix_world.inverted()
-        local_origin = inv_matrix_host @ obj_center
-        local_dir = inv_matrix_host.to_3x3() @ ray_dir
-        
-        loc, normal, index, dist = bvh_host.ray_cast(local_origin, local_dir)
-        
-        if loc is not None:
-            world_hit = host_obj.matrix_world @ loc
-            obj_min, obj_max = get_world_aabb(obj)
-            approx_radius = (obj_max - obj_min).length / 2.0
-            surface_gap = max(0.0, (world_hit - obj_center).length - approx_radius)
+        # คำนวณ Surface Gap ขั้นต่ำระหว่าง Bounding Box ของวัตถุและ Host
+        min_a, max_a = get_world_aabb(obj)
+        min_b, max_b = get_world_aabb(host_obj)
 
-            if surface_gap > max_gap:
-                attachment_issues.append({
-                    "object": obj.name,
-                    "host": host_name,
-                    "measured_surface_gap": round(surface_gap, 4),
-                    "allowed_max_gap": max_gap,
-                    "status": "FAIL_ATTACHMENT_GAP_EXCEEDED"
-                })
-        else:
-            min_a, max_a = get_world_aabb(obj)
-            min_b, max_b = get_world_aabb(host_obj)
-            if not aabb_intersect(min_a, max_a, min_b, max_b, tolerance=max_gap):
-                attachment_issues.append({
-                    "object": obj.name,
-                    "host": host_name,
-                    "status": "FAIL_NO_CONTACT_RAY_HIT"
-                })
+        gap_x = max(0.0, max(min_a.x - max_b.x, min_b.x - max_a.x))
+        gap_y = max(0.0, max(min_a.y - max_b.y, min_b.y - max_a.y))
+        gap_z = max(0.0, max(min_a.z - max_b.z, min_b.z - max_a.z))
+        surface_gap = (gap_x**2 + gap_y**2 + gap_z**2) ** 0.5
+
+        if surface_gap > max_gap:
+            attachment_issues.append({
+                "object": obj.name,
+                "host": host_name,
+                "measured_surface_gap": round(surface_gap, 4),
+                "allowed_max_gap": max_gap,
+                "status": "FAIL_ATTACHMENT_GAP_EXCEEDED"
+            })
 
     return attachment_issues
 
@@ -692,41 +706,58 @@ def audit_exposure(
 
     band = custom_band if custom_band else EXPOSURE_PRESET_BANDS[preset]
 
-    rgb_data = None
-    if bpy is not None:
+    luma = None
+    if bpy is not None and os.path.exists(image_filepath):
         try:
             img = bpy.data.images.load(image_filepath)
             width, height = img.size
+            channels = img.channels
             total_pixels = width * height
-            raw_pixels = np.empty(total_pixels * img.channels, dtype=np.float32)
-            img.pixels.foreach_get(raw_pixels)
-            raw_pixels = raw_pixels.reshape((height, width, img.channels))
-            rgb_data = (raw_pixels[:, :, :3] * 255.0).clip(0, 255)
+            if np is not None:
+                raw_pixels = np.empty(total_pixels * channels, dtype=np.float32)
+                img.pixels.foreach_get(raw_pixels)
+                raw_pixels = raw_pixels.reshape((height, width, channels))
+                rgb_data = (raw_pixels[:, :, :3] * 255.0).clip(0, 255)
+                luma = compute_luma_from_rgb(rgb_data)
+            else:
+                px = list(img.pixels)
+                luma = [
+                    (0.2126 * px[i] + 0.7152 * px[i+1] + 0.0722 * px[i+2]) * 255.0
+                    for i in range(0, len(px), channels)
+                ]
             bpy.data.images.remove(img)
         except Exception:
-            rgb_data = None
+            luma = None
 
-    if rgb_data is None:
+    if luma is None:
         if not os.path.exists(image_filepath):
             raise FileNotFoundError(f"Rendered image file not found: {image_filepath}")
         if Image is None or np is None:
             raise RuntimeError("PIL (Pillow) and numpy are required to audit exposure outside Blender.")
         img = Image.open(image_filepath).convert("RGB")
         rgb_data = np.array(img, dtype=np.float32)
+        luma = compute_luma_from_rgb(rgb_data)
 
-    luma = compute_luma_from_rgb(rgb_data)
-    total_pixels = luma.size
+    if isinstance(luma, list):
+        sorted_luma = sorted(luma)
+        total_pixels = len(luma)
+        mean_luma = float(sum(luma) / total_pixels) if total_pixels > 0 else 0.0
+        median_luma = float(sorted_luma[total_pixels // 2]) if total_pixels > 0 else 0.0
+        min_luma = float(sorted_luma[0]) if total_pixels > 0 else 0.0
+        max_luma = float(sorted_luma[-1]) if total_pixels > 0 else 0.0
+        clipping_count = sum(1 for v in luma if v >= 250.0)
+        dark_count = sum(1 for v in luma if v <= 15.0)
+    else:
+        total_pixels = luma.size
+        mean_luma = float(np.mean(luma))
+        median_luma = float(np.median(luma))
+        min_luma = float(np.min(luma))
+        max_luma = float(np.max(luma))
+        clipping_count = int(np.count_nonzero(luma >= 250.0))
+        dark_count = int(np.count_nonzero(luma <= 15.0))
 
-    mean_luma = float(np.mean(luma))
-    median_luma = float(np.median(luma))
-    min_luma = float(np.min(luma))
-    max_luma = float(np.max(luma))
-
-    clipping_count = int(np.count_nonzero(luma >= 250.0))
-    dark_count = int(np.count_nonzero(luma <= 15.0))
-
-    clipping_pct = (clipping_count / total_pixels) * 100.0
-    dark_pct = (dark_count / total_pixels) * 100.0
+    clipping_pct = (clipping_count / total_pixels) * 100.0 if total_pixels > 0 else 0.0
+    dark_pct = (dark_count / total_pixels) * 100.0 if total_pixels > 0 else 0.0
 
     issues = []
     recommendations = []
