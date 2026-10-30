@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Blender Headless QA Suite: Geometry, Scene & Exposure Quality Checker
-Implements deterministic QA audits based on Capybala BPY engineering standards:
-  1. AABB Fast-Path & BVH Mesh-level Interpenetration Audit (audit_interpenetration)
-  2. Multi-point Raycast Floating & Submersion Audit (audit_floating)
-  3. Surface-gap Attachment Contact Audit (audit_attachment_contact)
-  4. Array & Pattern Spacing Drift Audit (audit_spacing)
-  5. Calibrated Exposure & Luma Distribution Audit (audit_exposure)
+Blender Headless QA Suite: Universal Multi-Genre Quality Checker
+Implements comprehensive deterministic QA audits based on Capybala BPY engineering standards:
+  1. Polycount Budget & LOD Audit (audit_polycount)
+  2. Transform & Pivot Grounding Audit (audit_transforms)
+  3. Mesh Topology & Manifold Audit (audit_mesh_topology)
+  4. Material & glTF 2.0 Export Safety (audit_materials_compatibility)
+  5. AABB Fast-Path & BVH Mesh-level Interpenetration (audit_interpenetration)
+  6. Multi-point Raycast Floating & Submersion (audit_floating)
+  7. Surface-gap Attachment Contact (audit_attachment_contact)
+  8. Array & Pattern Spacing Drift (audit_spacing)
+  9. Calibrated Exposure & Luma Distribution (audit_exposure)
+  10. Headless glTF/GLB Export Verification (audit_glb_export)
 """
 
 import sys
@@ -28,6 +33,17 @@ try:
 except ImportError:
     np = None
     Image = None
+
+try:
+    from .profile_loader import load_profile
+    from .shader_generator import audit_material_nodes
+except ImportError:
+    try:
+        from profile_loader import load_profile
+        from shader_generator import audit_material_nodes
+    except ImportError:
+        load_profile = None
+        audit_material_nodes = None
 
 # ==============================================================================
 # Exposure Preset Bands (§10.2 Exposure Standards)
@@ -71,8 +87,8 @@ EXPOSURE_PRESET_BANDS: Dict[str, Dict[str, Any]] = {
 
 def mark_assembly_mate(obj_a, obj_b):
     """ทำเครื่องหมายยกเว้นการตรวจสอบการชนสำหรับชิ้นส่วนที่สวมประกบกันตามธรรมชาติ"""
-    obj_a["_mate_with"] = obj_b.name
-    obj_b["_mate_with"] = obj_a.name
+    obj_a["_mate_with"] = obj_b.name if hasattr(obj_b, "name") else str(obj_b)
+    obj_b["_mate_with"] = obj_a.name if hasattr(obj_a, "name") else str(obj_a)
 
 def mark_side_attached(obj, host_obj):
     """ทำเครื่องหมายชิ้นส่วนที่ยึดติดผนัง/ด้านข้างของวัตถุแม่ (เช่น ป้าย, สวิตช์ไฟ)"""
@@ -90,18 +106,22 @@ def mark_joint_attached(obj, host_obj):
 
 def get_world_aabb(obj) -> Tuple[Any, Any]:
     """คำนวณ Axis-Aligned Bounding Box (Min/Max) ในระบบพิกัดโลก (World Space)"""
-    bbox_corners = [obj.matrix_world @ mathutils.Vector(corner) for corner in obj.bound_box]
-    min_coord = mathutils.Vector((
-        min(c.x for c in bbox_corners),
-        min(c.y for c in bbox_corners),
-        min(c.z for c in bbox_corners)
-    ))
-    max_coord = mathutils.Vector((
-        max(c.x for c in bbox_corners),
-        max(c.y for c in bbox_corners),
-        max(c.z for c in bbox_corners)
-    ))
-    return min_coord, max_coord
+    if hasattr(obj, "_custom_aabb") and obj._custom_aabb is not None:
+        return obj._custom_aabb
+    if mathutils is not None and hasattr(obj, "matrix_world") and hasattr(obj, "bound_box"):
+        bbox_corners = [obj.matrix_world @ mathutils.Vector(corner) for corner in obj.bound_box]
+        min_coord = mathutils.Vector((
+            min(c.x for c in bbox_corners),
+            min(c.y for c in bbox_corners),
+            min(c.z for c in bbox_corners)
+        ))
+        max_coord = mathutils.Vector((
+            max(c.x for c in bbox_corners),
+            max(c.y for c in bbox_corners),
+            max(c.z for c in bbox_corners)
+        ))
+        return min_coord, max_coord
+    raise ValueError(f"Object {obj} does not support world AABB calculation.")
 
 def aabb_intersect(min_a, max_a, min_b, max_b, tolerance: float = 1e-4) -> bool:
     """AABB Fast-path: ตรวจสอบการทับซ้อนของ Bounding Box ในพิกัด 3 มิติ"""
@@ -137,7 +157,223 @@ def get_base_probe_points(obj, probe_offset: float = 0.005) -> Tuple[List[Any], 
     return probe_points, min_z
 
 # ==============================================================================
-# 2. Interpenetration Audit (ตรวจการชนกันของวัตถุจริง)
+# 2. Polycount Budget & LOD Audit
+# ==============================================================================
+
+def audit_polycount(
+    objects: Optional[List[Any]] = None,
+    profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    ตรวจสอบจำนวนโพลีกอน (Triangles / Vertices) เทียบกับงบประมาณของ Profile
+    """
+    if objects is None:
+        if bpy is not None:
+            objects = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+        else:
+            objects = []
+
+    total_tris = 0
+    total_verts = 0
+    total_faces = 0
+    breakdown = []
+
+    if bpy is not None:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for obj in objects:
+            try:
+                eval_obj = obj.evaluated_get(depsgraph)
+                eval_mesh = eval_obj.to_mesh()
+                eval_mesh.calc_loop_triangles()
+                tris = len(eval_mesh.loop_triangles)
+                verts = len(eval_mesh.vertices)
+                faces = len(eval_mesh.polygons)
+                eval_obj.to_mesh_clear()
+            except Exception:
+                tris = len(obj.data.polygons) * 2 if hasattr(obj, "data") and hasattr(obj.data, "polygons") else 0
+                verts = len(obj.data.vertices) if hasattr(obj, "data") and hasattr(obj.data, "vertices") else 0
+                faces = len(obj.data.polygons) if hasattr(obj, "data") and hasattr(obj.data, "polygons") else 0
+
+            total_tris += tris
+            total_verts += verts
+            total_faces += faces
+            breakdown.append({"object": obj.name, "tris": tris, "verts": verts, "faces": faces})
+    else:
+        # Fallback / Mock environment
+        for obj in objects:
+            tris = getattr(obj, "tris_count", 0)
+            verts = getattr(obj, "verts_count", 0)
+            faces = getattr(obj, "faces_count", 0)
+            if hasattr(obj, "data"):
+                if hasattr(obj.data, "polygons"):
+                    faces = len(obj.data.polygons)
+                    tris = sum(max(1, len(p.vertices) - 2) for p in obj.data.polygons)
+                if hasattr(obj.data, "vertices"):
+                    verts = len(obj.data.vertices)
+
+            total_tris += tris
+            total_verts += verts
+            total_faces += faces
+            breakdown.append({"object": getattr(obj, "name", "unknown"), "tris": tris, "verts": verts, "faces": faces})
+
+    budget = profile.get("polycount_budget", {}) if profile else {}
+    target_tris = budget.get("target_tris", 1000)
+    max_tris = budget.get("max_tris", 2500)
+
+    status = "PASS"
+    issues = []
+    if total_tris > max_tris:
+        status = "FAIL_POLYCOUNT_EXCEEDED"
+        issues.append(f"Total tris {total_tris} exceeds maximum allowed {max_tris} in profile.")
+    elif total_tris > target_tris:
+        status = "WARN_ABOVE_TARGET_TRIS"
+
+    return {
+        "status": status,
+        "total_tris": total_tris,
+        "total_verts": total_verts,
+        "total_faces": total_faces,
+        "target_tris": target_tris,
+        "max_tris": max_tris,
+        "issues": issues,
+        "breakdown": breakdown
+    }
+
+# ==============================================================================
+# 3. Transform & Pivot Grounding Audit
+# ==============================================================================
+
+def audit_transforms(
+    objects: Optional[List[Any]] = None,
+    profile: Optional[Dict[str, Any]] = None,
+    scale_tolerance: float = 1e-4
+) -> List[Dict[str, Any]]:
+    """
+    ตรวจสอบความถูกต้องของ Transform (Scale ต้องเป็น 1.0, Origin และการแนบพื้น)
+    """
+    if objects is None:
+        if bpy is not None:
+            objects = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+        else:
+            objects = []
+
+    grounding_cfg = profile.get("grounding", {}) if profile else {}
+    enforce_base = grounding_cfg.get("enforce_pivot_base", True)
+    target_min_z = grounding_cfg.get("target_min_z", 0.0)
+    z_tolerance = grounding_cfg.get("z_tolerance", 0.005)
+
+    issues = []
+
+    for obj in objects:
+        # 1. ตรวจสอบ Unapplied Scale
+        if hasattr(obj, "scale"):
+            scale = obj.scale
+            if (abs(scale[0] - 1.0) > scale_tolerance or 
+                abs(scale[1] - 1.0) > scale_tolerance or 
+                abs(scale[2] - 1.0) > scale_tolerance):
+                issues.append({
+                    "object": obj.name,
+                    "status": "FAIL_UNAPPLIED_SCALE",
+                    "measured_scale": (round(scale[0], 4), round(scale[1], 4), round(scale[2], 4)),
+                    "message": "Object scale is not applied (1.0, 1.0, 1.0)."
+                })
+
+        # 2. ตรวจสอบการแนบระนาบพื้นฐานล่าง (Z=0 Grounding)
+        if enforce_base:
+            # ข้ามวัตถุที่เป็นพื้นดินหรือชิ้นส่วนที่ติดด้านข้าง
+            if obj.get("_side_attached") or obj.get("_joint_attached") or "Floor" in obj.name or "Ground" in obj.name:
+                continue
+
+            try:
+                min_coord, _ = get_world_aabb(obj)
+                diff = abs(min_coord.z - target_min_z)
+                if diff > z_tolerance:
+                    issues.append({
+                        "object": obj.name,
+                        "status": "FAIL_BASE_OFF_GROUND",
+                        "measured_min_z": round(min_coord.z, 4),
+                        "target_min_z": target_min_z,
+                        "diff": round(diff, 4),
+                        "allowed_tolerance": z_tolerance,
+                        "message": f"Object base min Z is {min_coord.z:.4f}m, expected {target_min_z:.4f}m."
+                    })
+            except Exception:
+                pass
+
+    return issues
+
+# ==============================================================================
+# 4. Mesh Topology & Manifold Audit
+# ==============================================================================
+
+def audit_mesh_topology(objects: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    """
+    ตรวจสอบสุขอนามัยของ Mesh (Non-manifold edges, Loose vertices)
+    """
+    if bpy is None:
+        return []
+
+    if objects is None:
+        objects = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+
+    topology_issues = []
+    for obj in objects:
+        mesh = obj.data
+        if not hasattr(mesh, "edges"):
+            continue
+
+        non_manifold_count = sum(1 for e in mesh.edges if not getattr(e, "is_manifold", True))
+        loose_edge_count = sum(1 for e in mesh.edges if len(getattr(e, "link_faces", [])) == 0)
+
+        if non_manifold_count > 0:
+            topology_issues.append({
+                "object": obj.name,
+                "status": "WARN_NON_MANIFOLD_EDGES",
+                "non_manifold_edges": non_manifold_count,
+                "message": f"Found {non_manifold_count} non-manifold edges. Check for internal faces."
+            })
+
+        if loose_edge_count > 0:
+            topology_issues.append({
+                "object": obj.name,
+                "status": "WARN_LOOSE_EDGES",
+                "loose_edges": loose_edge_count,
+                "message": f"Found {loose_edge_count} loose edges without attached faces."
+            })
+
+    return topology_issues
+
+# ==============================================================================
+# 5. Material & glTF Compatibility Audit
+# ==============================================================================
+
+def audit_materials_compatibility(objects: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    """
+    ตรวจสอบวัสดุในฉากว่ารองรับการ Export ไปยัง glTF 2.0 / Godot 4.x หรือไม่
+    """
+    if audit_material_nodes is None:
+        return []
+
+    if objects is None and bpy is not None:
+        objects = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+
+    material_reports = []
+    checked_materials = set()
+
+    for obj in (objects or []):
+        mat_slots = getattr(obj, "material_slots", [])
+        for slot in mat_slots:
+            mat = slot.material
+            if mat and mat.name not in checked_materials:
+                checked_materials.add(mat.name)
+                rep = audit_material_nodes(mat)
+                if not rep["compatible"]:
+                    material_reports.append(rep)
+
+    return material_reports
+
+# ==============================================================================
+# 6. Interpenetration Audit (ตรวจการชนกันของวัตถุจริง)
 # ==============================================================================
 
 def audit_interpenetration(
@@ -200,7 +436,7 @@ def audit_interpenetration(
     return interpenetrations
 
 # ==============================================================================
-# 3. Floating & Submersion Audit (ตรวจหาวัตถุลอยหรือจมดิน)
+# 7. Floating & Submersion Audit (ตรวจหาวัตถุลอยหรือจมดิน)
 # ==============================================================================
 
 def audit_floating(
@@ -292,7 +528,7 @@ def audit_floating(
     return floating_issues
 
 # ==============================================================================
-# 4. Attachment Contact Audit (§13.9 Attachment Contact Audit)
+# 8. Attachment Contact Audit (§13.9 Attachment Contact Audit)
 # ==============================================================================
 
 def audit_attachment_contact(
@@ -301,9 +537,6 @@ def audit_attachment_contact(
 ) -> List[Dict[str, Any]]:
     """
     ตรวจสอบระยะแนบสนิท (Surface-gap check) ของชิ้นส่วนที่ติดกับวัตถุแม่
-    (สำหรับวัตถุที่ติดป้าย _side_attached หรือ _joint_attached)
-    :param objects: รายการวัตถุที่ต้องการตรวจสอบ (หาก None จะตรวจค้นวัตถุที่มี Tag ทั้งหมดในฉาก)
-    :param max_gap: ระยะห่างสูงสุดที่ยอมรับได้ (เมตร) ค่าเริ่มต้น 5 มม.
     """
     if bpy is None:
         raise RuntimeError("Blender bpy module is required to execute audit_attachment_contact.")
@@ -337,12 +570,10 @@ def audit_attachment_contact(
             })
             continue
 
-        # ยิง Raycast ระหว่างจุดกึ่งกลางของ Bounding box ของวัตถุ ไปยัง Bounding box ของ Host
         obj_center = obj.matrix_world.translation
         host_center = host_obj.matrix_world.translation
         ray_dir = (host_center - obj_center).normalized()
         
-        # Raycast เข้าหาพื้นผิว Host Mesh ด้วย BVHTree
         bvh_host = BVHTree.FromObject(host_obj, depsgraph)
         inv_matrix_host = host_obj.matrix_world.inverted()
         local_origin = inv_matrix_host @ obj_center
@@ -352,8 +583,6 @@ def audit_attachment_contact(
         
         if loc is not None:
             world_hit = host_obj.matrix_world @ loc
-            # คำนวณระยะห่างผิวสัมผัสขั้นต่ำ
-            # หักลบด้วยขอบเขตวัตถุตัวมันเองคร่าวๆ ตามแนวรัศมี
             obj_min, obj_max = get_world_aabb(obj)
             approx_radius = (obj_max - obj_min).length / 2.0
             surface_gap = max(0.0, (world_hit - obj_center).length - approx_radius)
@@ -367,7 +596,6 @@ def audit_attachment_contact(
                     "status": "FAIL_ATTACHMENT_GAP_EXCEEDED"
                 })
         else:
-            # ตรวจสอบ AABB Distance สำรอง
             min_a, max_a = get_world_aabb(obj)
             min_b, max_b = get_world_aabb(host_obj)
             if not aabb_intersect(min_a, max_a, min_b, max_b, tolerance=max_gap):
@@ -380,7 +608,7 @@ def audit_attachment_contact(
     return attachment_issues
 
 # ==============================================================================
-# 5. Spacing & Pattern Drift Audit (ตรวจจับระยะห่างในแถวที่คลาดเคลื่อน)
+# 9. Spacing & Pattern Drift Audit
 # ==============================================================================
 
 def audit_spacing(
@@ -391,10 +619,6 @@ def audit_spacing(
 ) -> Dict[str, Any]:
     """
     ตรวจสอบระยะห่างของแถววัตถุ (Array/Pattern) ว่าเท่ากันอย่างสม่ำเสมอหรือไม่
-    :param object_group: รายชื่อวัตถุในแถวเดียวกัน
-    :param expected_axis: แกนหลักของการเรียงตัว ('X', 'Y', หรือ 'Z')
-    :param tolerance_ratio: อัตราส่วนความคลาดเคลื่อนที่ยอมรับได้ (เช่น 0.05 = 5% ของระยะมัธยฐาน)
-    :param min_drift_threshold: เกณฑ์คลาดเคลื่อนขั้นต่ำเป็นเมตร (สำหรับวัตถุขนาดเล็ก ป้องกันเกณฑ์เข้มงวดเกินไป)
     """
     if len(object_group) < 3:
         return {
@@ -402,11 +626,9 @@ def audit_spacing(
             "message": "ชิ้นส่วนน้อยกว่า 3 ชิ้น ไม่ต้องตรวจวัด Pattern สม่ำเสมอ"
         }
 
-    # 1. เรียงลำดับวัตถุตามแกนหลักที่กำหนด
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(expected_axis.upper(), 0)
     sorted_objs = sorted(object_group, key=lambda o: o.matrix_world.translation[axis_idx])
 
-    # 2. คำนวณระยะห่างระหว่างวัตถุที่อยู่ติดกันทีละคู่
     spacings = []
     for i in range(len(sorted_objs) - 1):
         p1 = sorted_objs[i].matrix_world.translation
@@ -414,12 +636,10 @@ def audit_spacing(
         dist = (p2 - p1).length
         spacings.append((sorted_objs[i].name, sorted_objs[i+1].name, dist))
 
-    # 3. คำนวณค่ามัธยฐาน (Median Spacing) เพื่อใช้เป็นเกณฑ์อ้างอิง
     distances = [s[2] for s in spacings]
     sorted_distances = sorted(distances)
     median_spacing = sorted_distances[len(sorted_distances) // 2]
 
-    # คำนวณ Adaptive Tolerance
     allowed_drift = max(median_spacing * tolerance_ratio, min_drift_threshold)
 
     drifted_items = []
@@ -434,7 +654,6 @@ def audit_spacing(
                 "allowed_drift": round(allowed_drift, 4)
             })
 
-    # 4. รายงานผลลัพธ์
     if drifted_items:
         return {
             "status": "FAIL_SPACING_DRIFT",
@@ -450,18 +669,13 @@ def audit_spacing(
     }
 
 # ==============================================================================
-# 6. Exposure & Luma Distribution Audit (§10.2 Calibrated Luma Bands)
+# 10. Calibrated Exposure & Luma Distribution Audit
 # ==============================================================================
 
 def compute_luma_from_rgb(rgb_array: Any) -> Any:
-    """
-    คำนวณค่า Luma (ความสว่าง) จากช่องสี RGB ตามมาตรฐาน Rec. 709
-    Y = 0.2126 * R + 0.7152 * G + 0.0722 * B
-    """
+    """คำนวณค่า Luma จาก RGB (Rec. 709)"""
     if np is None:
         raise RuntimeError("numpy module is required to compute luma statistics.")
-    
-    # rgb_array should be shaped (..., 3) in range [0, 255]
     weights = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
     return np.tensordot(rgb_array[..., :3], weights, axes=([ -1 ], [ 0 ]))
 
@@ -472,16 +686,12 @@ def audit_exposure(
 ) -> Dict[str, Any]:
     """
     ตรวจสอบค่าการรับแสงและการกระจายตัวของ Luma จากภาพเรนเดอร์เทียบกับพรีเซ็ต
-    :param image_filepath: เส้นทางไฟล์ภาพเรนเดอร์ (.png, .jpg, .exr)
-    :param preset: พรีเซ็ตแสงเป้าหมาย ('studio', 'outdoor_golden', 'night', 'space')
-    :param custom_band: กำหนดช่วงความสว่างเฉพาะกิจ (ถ้ามี)
     """
     if preset not in EXPOSURE_PRESET_BANDS and custom_band is None:
         raise ValueError(f"Unknown preset: '{preset}'. Available: {list(EXPOSURE_PRESET_BANDS.keys())}")
 
     band = custom_band if custom_band else EXPOSURE_PRESET_BANDS[preset]
 
-    # โหลดพิกเซลภาพ
     rgb_data = None
     if bpy is not None:
         try:
@@ -491,14 +701,11 @@ def audit_exposure(
             raw_pixels = np.empty(total_pixels * img.channels, dtype=np.float32)
             img.pixels.foreach_get(raw_pixels)
             raw_pixels = raw_pixels.reshape((height, width, img.channels))
-            # สเกลเป็น [0, 255]
             rgb_data = (raw_pixels[:, :, :3] * 255.0).clip(0, 255)
-            # เคลียร์หน่วยความจำภาพใน bpy
             bpy.data.images.remove(img)
         except Exception:
             rgb_data = None
 
-    # สแตนด์อโลน fallback โหลดผ่าน PIL
     if rgb_data is None:
         if not os.path.exists(image_filepath):
             raise FileNotFoundError(f"Rendered image file not found: {image_filepath}")
@@ -515,7 +722,6 @@ def audit_exposure(
     min_luma = float(np.min(luma))
     max_luma = float(np.max(luma))
 
-    # คำนวณร้อยละของพื้นที่ตัดยอด (Clipping >= 250) และพื้นที่มืดสนิท (Dark <= 15)
     clipping_count = int(np.count_nonzero(luma >= 250.0))
     dark_count = int(np.count_nonzero(luma <= 15.0))
 
@@ -525,7 +731,6 @@ def audit_exposure(
     issues = []
     recommendations = []
 
-    # 1. ตรวจสอบ Mean Luma ให้อยู่ในช่วงมาตรฐาน
     mean_min = band["mean_min"]
     mean_max = band["mean_max"]
     if mean_luma < mean_min:
@@ -535,19 +740,16 @@ def audit_exposure(
         issues.append(f"OVER_EXPOSED: Mean luma {mean_luma:.1f} exceeds maximum {mean_max:.1f}")
         recommendations.append("Reduce Key/Fill Light power or increase camera F-stop.")
 
-    # 2. ตรวจสอบพื้นที่ตัดยอด (Clipping)
     max_clipping = band.get("max_clipping_pct", 1.5)
     if clipping_pct > max_clipping:
         issues.append(f"SPECULAR_BURNOUT: Clipping {clipping_pct:.2f}% exceeds limit {max_clipping:.2f}%")
         recommendations.append("Dim bright area lamps or reduce specular roughness on blown-out materials.")
 
-    # 3. ตรวจสอบพื้นที่มืดทึบ (Crushed Blacks)
     max_dark = band.get("max_dark_pct", 35.0)
     if dark_pct > max_dark:
         issues.append(f"EXCESSIVE_DARKNESS: Dark area {dark_pct:.1f}% exceeds limit {max_dark:.1f}%")
         recommendations.append("Add subtle Fill light or increase ambient bounce.")
 
-    # 4. ตรวจสอบ Hotspot Drift สำหรับฉากกลางคืน (§10.2 กฎเหล็กข้อ 4)
     if preset == "night":
         max_diff = band.get("max_mean_median_diff", 18.0)
         diff = abs(mean_luma - median_luma)
@@ -577,29 +779,100 @@ def audit_exposure(
     }
 
 # ==============================================================================
-# 7. Comprehensive Master QA Runner
+# 11. Headless GLTF / GLB Export Verification
+# ==============================================================================
+
+def audit_glb_export(
+    export_filepath: str,
+    objects: Optional[List[Any]] = None
+) -> Dict[str, Any]:
+    """
+    ตรวจสอบการ Export ไฟล์เป็น glTF/GLB พร้อมวัดขนาดไฟล์และความสมบูรณ์
+    """
+    if bpy is None:
+        return {
+            "status": "SKIP_NO_BLENDER",
+            "filepath": export_filepath,
+            "message": "Blender environment required for glTF export."
+        }
+
+    os.makedirs(os.path.dirname(os.path.abspath(export_filepath)), exist_ok=True)
+
+    try:
+        bpy.ops.export_scene.gltf(
+            filepath=export_filepath,
+            export_format='GLB',
+            use_selection=False,
+            export_apply=True
+        )
+        if os.path.exists(export_filepath) and os.path.getsize(export_filepath) > 0:
+            size_kb = round(os.path.getsize(export_filepath) / 1024.0, 2)
+            return {
+                "status": "PASS",
+                "filepath": export_filepath,
+                "file_size_kb": size_kb
+            }
+        else:
+            return {
+                "status": "FAIL_FILE_NOT_CREATED",
+                "filepath": export_filepath,
+                "message": "GLB export completed without errors but destination file is empty or missing."
+            }
+    except Exception as e:
+        return {
+            "status": "FAIL_EXPORT_ERROR",
+            "filepath": export_filepath,
+            "error": str(e)
+        }
+
+# ==============================================================================
+# 12. Comprehensive Master QA Runner
 # ==============================================================================
 
 def run_full_qa_audit(
     render_image_path: Optional[str] = None,
-    preset: str = "studio",
-    array_groups: Optional[Dict[str, List[Any]]] = None
+    preset: Optional[str] = None,
+    profile_name_or_dict: Optional[Any] = None,
+    array_groups: Optional[Dict[str, List[Any]]] = None,
+    glb_export_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    รันการตรวจสอบคุณภาพรอบด้าน (Geometry, Attachment, Spacing, Exposure)
+    รันการตรวจสอบคุณภาพรอบด้าน 5 มิติแบบสมบูรณ์
     :param render_image_path: เส้นทางรูปภาพเรนเดอร์สำหรับการตรวจสอบแสง (Optional)
-    :param preset: พรีเซ็ตการจัดแสงสำหรับการตรวจสอบ Luma ('studio', 'outdoor_golden', 'night', 'space')
+    :param preset: พรีเซ็ตการจัดแสง (ถ้ามีระบุใน profile จะถูกแทนที่ด้วย profile)
+    :param profile_name_or_dict: ชื่อโปรไฟล์ (เช่น 'lowpoly_prop') หรือ dict ของโปรไฟล์
     :param array_groups: ดิกชันนารีของกลุ่มวัตถุที่จัดเรียงเป็นอาเรย์
+    :param glb_export_path: เส้นทางส่งออก GLB เพื่อทดสอบการส่งออกจริง (Optional)
     """
+    # 1. Resolve Profile
+    active_profile = None
+    if isinstance(profile_name_or_dict, dict):
+        active_profile = profile_name_or_dict
+    elif isinstance(profile_name_or_dict, str) and load_profile is not None:
+        active_profile = load_profile(profile_name_or_dict)
+    elif load_profile is not None:
+        active_profile = load_profile("default_generic")
+
+    selected_preset = preset or (active_profile.get("exposure_preset", "studio") if active_profile else "studio")
+
     interpenetrations = []
     floating = []
     attachments = []
+    transform_issues = []
+    topology_issues = []
+    material_issues = []
 
     if bpy is not None:
         interpenetrations = audit_interpenetration()
         floating = audit_floating()
         attachments = audit_attachment_contact()
-    
+        transform_issues = audit_transforms(profile=active_profile)
+        topology_issues = audit_mesh_topology()
+        material_issues = audit_materials_compatibility()
+
+    polycount_rep = audit_polycount(profile=active_profile)
+    polycount_passed = polycount_rep["status"] in ("PASS", "WARN_ABOVE_TARGET_TRIS")
+
     spacing_reports = {}
     spacing_passed = True
     if array_groups:
@@ -612,37 +885,57 @@ def run_full_qa_audit(
     exposure_report = None
     exposure_passed = True
     if render_image_path:
-        exposure_report = audit_exposure(render_image_path, preset=preset)
+        exposure_report = audit_exposure(render_image_path, preset=selected_preset)
         if exposure_report["status"] != "PASS":
             exposure_passed = False
+
+    glb_report = None
+    glb_passed = True
+    if glb_export_path:
+        glb_report = audit_glb_export(glb_export_path)
+        if glb_report["status"] not in ("PASS", "SKIP_NO_BLENDER"):
+            glb_passed = False
 
     passed = (
         (len(interpenetrations) == 0) and 
         (len(floating) == 0) and 
         (len(attachments) == 0) and 
+        (len(transform_issues) == 0) and 
+        polycount_passed and 
         spacing_passed and 
-        exposure_passed
+        exposure_passed and 
+        glb_passed
     )
 
     report = {
         "qa_passed": passed,
+        "profile_used": active_profile.get("profile_name", "none") if active_profile else "none",
+        "polycount_audit": polycount_rep,
+        "transform_issues": transform_issues,
+        "topology_issues": topology_issues,
+        "material_issues": material_issues,
         "interpenetration_issues": interpenetrations,
         "floating_issues": floating,
         "attachment_issues": attachments,
         "spacing_issues": spacing_reports,
         "exposure_audit": exposure_report,
+        "glb_export_audit": glb_report,
         "summary": {
             "total_collisions": len(interpenetrations),
             "total_floating": len(floating),
             "total_attachment_issues": len(attachments),
-            "total_spacing_groups_checked": len(array_groups) if array_groups else 0,
-            "exposure_audited": render_image_path is not None
+            "total_transform_issues": len(transform_issues),
+            "total_topology_warnings": len(topology_issues),
+            "total_tris": polycount_rep["total_tris"],
+            "polycount_status": polycount_rep["status"],
+            "exposure_audited": render_image_path is not None,
+            "glb_audited": glb_export_path is not None
         }
     }
     return report
 
 if __name__ == "__main__":
     if bpy is not None:
-        res = run_full_qa_audit()
+        res = run_full_qa_audit(profile_name_or_dict="lowpoly_prop")
         import json
         print("GEOMETRY_QA_REPORT:" + json.dumps(res, indent=2, ensure_ascii=False))

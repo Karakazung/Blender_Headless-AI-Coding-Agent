@@ -1,0 +1,26 @@
+{
+  "profile_name": "environment_kit",
+  "description": "Profile for environment modular kits, modular buildings, aquatic ponds, and architectural structures.",
+  "polycount_budget": {
+    "target_tris": 1500,
+    "max_tris": 3500
+  },
+  "scale_metric": "meters",
+  "grounding": {
+    "enforce_pivot_base": true,
+    "target_min_z": 0.0,
+    "z_tolerance": 0.002
+  },
+  "geometry_tolerance": {
+    "interpenetration_tolerance": 0.001,
+    "floating_max_gap": 0.005,
+    "floating_max_sink": -0.002,
+    "spacing_tolerance_ratio": 0.04
+  },
+  "materials": {
+    "style": "stylized_foliage_pbr",
+    "roughness_range": [0.3, 0.9],
+    "metallic_default": 0.0
+  },
+  "exposure_preset": "outdoor_golden"
+}

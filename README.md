@@ -1,21 +1,30 @@
-# Blender Headless AI Coding Agent (Automation Suite)
+# Blender Headless AI Coding Agent (Universal Multi-Genre Suite)
 
-ชุดเครื่องมือและสถาปัตยกรรมอัตโนมัติสำหรับการรัน **Blender แบบ Headless (Background Mode)** ควบคุมผ่าน Command Line และ Python BPY Script ออกแบบมาสำหรับ AI Coding Agent และ Automated Workflows โดยเฉพาะ
+ชุดเครื่องมือและสถาปัตยกรรมอัตโนมัติสำหรับการรัน **Blender แบบ Headless (Background Mode)** ควบคุมผ่าน Command Line และ Python BPY Script ออกแบบมาสำหรับ AI Coding Agent ตามมาตรฐาน **Capybala BPY & pstack Architecture**
 
 ---
 
 ## 🚀 คุณสมบัติเด่น (Key Features)
 
 - **Pure Headless Execution**: รันสคริปต์ 3D เบื้องหลัง 100% โดยไม่ต้องเปิดหน้าต่าง GUI
-- **Blender Path Resolution Protocol**: ค้นหาพาธของ `blender.exe` อัตโนมัติ 6 ระดับ (Cache, ENV, PATH, Registry, Common Drives) ไม่ต้องฮาร์ดโค้ดพาธ
-- **Scene Package Structure**: สถาปัตยกรรมแยกส่วนประกอบ 7 มิติ (`build`, `config`, `materials`, `geometry`, `layout`, `assertions`, `inspect`)
-- **Deterministic 5-Pillar Quality Audits**:
-  1. `audit_interpenetration()`: ตรวจจับ Bounding Box (AABB Fast-path) และคัดกรองการซ้อนทับระดับโพลีกอนด้วย BVHTree พร้อมรองรับ `mark_assembly_mate()`
-  2. `audit_floating()`: ตรวจจับวัตถุลอยในสุญญากาศ หรือจมดินลึกเกินพิกัดความเผื่อด้วย Multi-point Raycasting
-  3. `audit_attachment_contact()`: วัดระยะห่างผิวสัมผัส (Surface-gap check) สำหรับชิ้นส่วนติดผนัง (`mark_side_attached`) หรือข้อต่อสวมแกน (`mark_joint_attached`)
-  4. `audit_spacing()`: ตรวจจับระยะห่างในแถวหรืออาเรย์ที่ตำแหน่งคลาดเคลื่อน (Pattern & Array Drift) พร้อมคำนวณ Adaptive Tolerance
-  5. `audit_exposure()`: ตรวจวัดค่าความสว่างเฉลี่ย (Mean/Median Luma), อัตราส่วนจุดแสงตัดยอด (Specular Clipping >= 250), พื้นที่มืดสนิท (Crushed Blacks <= 15), และ Hotspot Drift ในฉากกลางคืน
-- **Production GLB Export**: ส่งออกโมเดลเกมและแอปพลิเคชัน 3D พร้อมเซ็ต Origin / Pivot Point ที่ฐานล่างกึ่งกลาง `(0, 0, 0)`
+- **Universal Multi-Genre Profiles (`profiles/*.json`)**:
+  - `lowpoly_prop.json`: ไอเทมเกมขนาดเล็ก พืช ก้อนหิน (Max 500 Tris, Pivot Grounded)
+  - `character.json`: ตัวละคร มาสคอต สิ่งมีชีวิตโมดูลาร์ (Max 4,500 Tris, Toon/Cel)
+  - `hard_surface.json`: อุปกรณ์อิเล็กทรอนิกส์ ชิ้นส่วนกลไก ยานพาหนะ (Max 8,000 Tris, Metallic PBR)
+  - `environment_kit.json`: ชุดฉาก สถาปัตยกรรม และบ่อน้ำ (Max 3,500 Tris)
+- **Procedural Shader Generator (`src/shader_generator.py`)**:
+  - สร้าง Principled BSDF procedural materials ที่เข้ากันได้กับ glTF 2.0 / Godot 4.x
+  - ด่านตรวจจับโหนด EEVEE/Volumetric ที่ไม่รองรับในเกมเอนจิน (`audit_material_nodes`)
+- **Comprehensive 4-Tier QA Hard Gates (`src/quality_checker.py`)**:
+  1. `audit_polycount()`: ตรวจสอบงบประมาณ Triangles เทียบกับ Profile ป้องกันโมเดลโพลีกอนบวม
+  2. `audit_transforms()`: ตรวจสอบ Unapplied Scale และการแนบสนิทระนาบพื้นฐานล่าง $Z = 0$
+  3. `audit_mesh_topology()`: ตรวจจับ Non-manifold edges และ Loose vertices/edges
+  4. `audit_interpenetration()`: ตรวจจับการชนกันของ Mesh ด้วย AABB Fast-Path และ BVHTree
+  5. `audit_floating()` & `audit_attachment_contact()`: ตรวจจับวัตถุลอยในสุญญากาศ หรือช่องว่างผิวสัมผัสชิ้นส่วนติดผนัง/ข้อต่อ
+  6. `audit_spacing()`: ตรวจจับระยะห่างในแถวหรืออาเรย์ที่ตำแหน่งคลาดเคลื่อน (Pattern & Array Drift)
+  7. `audit_exposure()`: ตรวจวัดค่าความสว่างเฉลี่ย (Mean/Median Luma), Specular Clipping, และ Crushed Blacks
+  8. `audit_glb_export()`: ตรวจสอบการส่งออกไฟล์ `.glb` จริงในโหมด Headless
+- **Complete 4-in-1 Deliverables**: ผลิต `.blend` + `.glb` + ภาพเรนเดอร์ + `qa_report.json` พร้อมบันทึกทักษะลงใน `.agents/skills/` อัตโนมัติ
 
 ---
 
@@ -23,14 +32,21 @@
 
 ```text
 Blender_Headless-AI-Coding-Agent/
+├── profiles/
+│   ├── lowpoly_prop.json       # โปรไฟล์สำหรับพร็อพเกมขนาดเล็ก
+│   ├── character.json          # โปรไฟล์สำหรับตัวละครและมาสคอต
+│   ├── hard_surface.json       # โปรไฟล์สำหรับชิ้นส่วนกลไกและฮาร์ดแวร์
+│   └── environment_kit.json    # โปรไฟล์สำหรับชุดฉากและสถาปัตยกรรม
 ├── scripts/
-│   ├── find_blender.ps1        # สคริปต์ค้นหาพาธ blender.exe อัตโนมัติ
+│   ├── find_blender.ps1        # สคริปต์ค้นหาพาธ blender.exe อัตโนมัติ 6 ระดับ
 │   ├── run_headless.ps1        # สคริปต์รันคำสั่ง Headless CLI มาตรฐาน
-│   └── template_worker.py      # ตัวอย่าง BPY Worker สคริปต์
+│   └── template_worker.py      # ตัวอย่าง BPY Worker สคริปต์แบบ Profile-driven
 ├── src/
-│   └── quality_checker.py      # โมดูลตรวจวัดค่า Luma และเรขาคณิต 5 เสาหลัก
+│   ├── profile_loader.py       # ระบบโหลดและรวมค่า Profile มาตรฐาน
+│   ├── shader_generator.py     # ตัวช่วยสร้างโหนด Shader และตรวจสอบ glTF Safety
+│   └── quality_checker.py      # โมดูลตรวจวัดคุณภาพ 4 ด่าน (Geometry, Transform, Exposure, Export)
 ├── tests/
-│   └── test_headless_smoke.py  # ชุดทดสอบ Unit & Smoke Test (12 checks)
+│   └── test_headless_smoke.py  # ชุดทดสอบ Unit & Smoke Test (17 checks)
 ├── .gitignore
 └── README.md
 ```
@@ -44,9 +60,13 @@ Blender_Headless-AI-Coding-Agent/
 powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 --probe
 ```
 
-### 2. รันสคริปต์สร้างโมเดลและเรนเดอร์แบบเบื้องหลัง
+### 2. รันสคริปต์สร้างโมเดลตามโปรไฟล์ที่ต้องการ
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 -Script scripts/template_worker.py
+# รันงาน Hard-surface
+powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 -Script scripts/template_worker.py -ScriptArgs "--profile hard_surface --out-dir outputs/drone"
+
+# รันงาน Low-poly Props สำหรับเกม
+powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 -Script scripts/template_worker.py -ScriptArgs "--profile lowpoly_prop --out-dir outputs/rock_pack"
 ```
 
 ### 3. รันชุดทดสอบคุณภาพ (Smoke & Unit Tests)
@@ -57,7 +77,6 @@ python tests/test_headless_smoke.py
 ---
 
 ## 📜 มาตรฐานค่าความสว่างแสง (Calibrated Exposure Bands)
-อ้างอิงตามข้อกำหนด **Capybala BPY §10.2**:
 - **สตูดิโอ (Studio)**: Mean Luma `100 – 170`, Max Clipping `<= 1.5%`, Max Dark `<= 35.0%`
 - **กลางแจ้งแสงสีทอง (Outdoor Golden)**: Mean Luma `95 – 175`, Max Clipping `<= 2.0%`, Max Dark `<= 30.0%`
 - **กลางคืน (Night)**: Mean Luma `15 – 70`, Max Clipping `<= 2.5%`, Max Dark `<= 55.0%`, `|Mean - Median| <= 18.0`

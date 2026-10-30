@@ -1,0 +1,26 @@
+{
+  "profile_name": "lowpoly_prop",
+  "description": "Standard profile for small to medium low-poly game props, flora, rocks, and pickup items.",
+  "polycount_budget": {
+    "target_tris": 250,
+    "max_tris": 500
+  },
+  "scale_metric": "meters",
+  "grounding": {
+    "enforce_pivot_base": true,
+    "target_min_z": 0.0,
+    "z_tolerance": 0.002
+  },
+  "geometry_tolerance": {
+    "interpenetration_tolerance": 0.001,
+    "floating_max_gap": 0.005,
+    "floating_max_sink": -0.002,
+    "spacing_tolerance_ratio": 0.05
+  },
+  "materials": {
+    "style": "stylized_flat_pbr",
+    "roughness_range": [0.4, 0.8],
+    "metallic_default": 0.0
+  },
+  "exposure_preset": "studio"
+}

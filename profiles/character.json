@@ -1,0 +1,27 @@
+{
+  "profile_name": "character",
+  "description": "Profile for low-poly characters, humanoid mascots, and chibi creatures with modular equipment slots.",
+  "polycount_budget": {
+    "target_tris": 2500,
+    "max_tris": 4500
+  },
+  "scale_metric": "meters",
+  "grounding": {
+    "enforce_pivot_base": true,
+    "target_min_z": 0.0,
+    "z_tolerance": 0.005
+  },
+  "geometry_tolerance": {
+    "interpenetration_tolerance": 0.002,
+    "floating_max_gap": 0.010,
+    "floating_max_sink": -0.005,
+    "spacing_tolerance_ratio": 0.08
+  },
+  "materials": {
+    "style": "toon_cel_pbr",
+    "roughness_range": [0.5, 0.7],
+    "metallic_default": 0.0,
+    "subsurface_allowed": true
+  },
+  "exposure_preset": "studio"
+}

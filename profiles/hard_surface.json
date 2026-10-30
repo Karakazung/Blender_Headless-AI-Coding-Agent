@@ -1,0 +1,26 @@
+{
+  "profile_name": "hard_surface",
+  "description": "Profile for mechanical components, tech gadgets, vehicles, and precision hard-surface assets.",
+  "polycount_budget": {
+    "target_tris": 3500,
+    "max_tris": 8000
+  },
+  "scale_metric": "meters",
+  "grounding": {
+    "enforce_pivot_base": true,
+    "target_min_z": 0.0,
+    "z_tolerance": 0.001
+  },
+  "geometry_tolerance": {
+    "interpenetration_tolerance": 0.0005,
+    "floating_max_gap": 0.002,
+    "floating_max_sink": -0.001,
+    "spacing_tolerance_ratio": 0.03
+  },
+  "materials": {
+    "style": "metallic_pbr",
+    "roughness_range": [0.15, 0.5],
+    "metallic_default": 0.85
+  },
+  "exposure_preset": "studio"
+}
