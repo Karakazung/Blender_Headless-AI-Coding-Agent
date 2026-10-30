@@ -8,6 +8,7 @@ param(
     [string]$PythonExpr = "",
     [switch]$Probe = $false,
     [string]$OutDir = "out",
+    [Alias("ExtraArgs")]
     [string[]]$ScriptArgs = @()
 )
 

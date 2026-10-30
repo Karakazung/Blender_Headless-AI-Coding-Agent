@@ -24,7 +24,11 @@
   6. `audit_spacing()`: ตรวจจับระยะห่างในแถวหรืออาเรย์ที่ตำแหน่งคลาดเคลื่อน (Pattern & Array Drift)
   7. `audit_exposure()`: ตรวจวัดค่าความสว่างเฉลี่ย (Mean/Median Luma), Specular Clipping, และ Crushed Blacks
   8. `audit_glb_export()`: ตรวจสอบการส่งออกไฟล์ `.glb` จริงในโหมด Headless
-- **Complete 4-in-1 Deliverables**: ผลิต `.blend` + `.glb` + ภาพเรนเดอร์ + `qa_report.json` พร้อมบันทึกทักษะลงใน `.agents/skills/` อัตโนมัติ
+- **Measurement-Driven Image-to-3D Pipeline (`src/image_reconstructor.py` & `src/blueprint_verifier.py`)**:
+  - ถอดโครงสร้างภาพอ้างอิง 2D เป็นโจทย์การวัด (Calibration, Silhouette Extraction, Aspect Ratio, Half-Profile Lathe Radii)
+  - สร้างเรขาคณิตด้วย Procedural BMesh (Pure Quads, Wall Thickness, Recessed Base, Swept Bezier Curved Handles)
+  - ตรวจสอบความเที่ยงตรงด้วย **Silhouette IoU (Intersection-over-Union)** และผลิตภาพวิเคราะห์ Blueprint Overlay อัตโนมัติ
+- **Complete 4-in-1 Deliverables**: ผลิต `.blend` + `.glb` + ภาพเรนเดอร์ + `qa_report.json` + `components.json` พร้อมบันทึกทักษะลงใน `.agents/skills/` อัตโนมัติ
 
 ---
 
@@ -40,13 +44,18 @@ Blender_Headless-AI-Coding-Agent/
 ├── scripts/
 │   ├── find_blender.ps1        # สคริปต์ค้นหาพาธ blender.exe อัตโนมัติ 6 ระดับ
 │   ├── run_headless.ps1        # สคริปต์รันคำสั่ง Headless CLI มาตรฐาน
-│   └── template_worker.py      # ตัวอย่าง BPY Worker สคริปต์แบบ Profile-driven
+│   ├── template_worker.py      # ตัวอย่าง BPY Worker สคริปต์แบบ Profile-driven
+│   ├── build_mech_robot.py     # ตัวอย่างการสร้าง Mech Robot พร้อม Armature Rigging
+│   └── build_from_reference.py # สคริปต์สร้างโมเดลจากภาพอ้างอิงและวัดผล IoU
 ├── src/
 │   ├── profile_loader.py       # ระบบโหลดและรวมค่า Profile มาตรฐาน
 │   ├── shader_generator.py     # ตัวช่วยสร้างโหนด Shader และตรวจสอบ glTF Safety
-│   └── quality_checker.py      # โมดูลตรวจวัดคุณภาพ 4 ด่าน (Geometry, Transform, Exposure, Export)
+│   ├── quality_checker.py      # โมดูลตรวจวัดคุณภาพ 4 ด่าน (Geometry, Transform, Exposure, Export)
+│   ├── image_reconstructor.py  # ระบบวัดขนาดและสร้างเรขาคณิต 3D จากภาพ 2D
+│   └── blueprint_verifier.py   # ระบบตรวจวัดความเที่ยงตรง Silhouette IoU และ Blueprint Overlay
 ├── tests/
-│   └── test_headless_smoke.py  # ชุดทดสอบ Unit & Smoke Test (17 checks)
+│   ├── test_headless_smoke.py  # ชุดทดสอบ Unit & Smoke Test (17 checks)
+│   └── test_image_reconstruction.py # ชุดทดสอบ Silhouette & IoU Verification (5 checks)
 ├── .gitignore
 └── README.md
 ```
@@ -69,9 +78,17 @@ powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 -Script script
 powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 -Script scripts/template_worker.py -ScriptArgs "--profile lowpoly_prop --out-dir outputs/rock_pack"
 ```
 
-### 3. รันชุดทดสอบคุณภาพ (Smoke & Unit Tests)
+### 3. รันการแปลงภาพอ้างอิงเป็นโมเดล 3D (Image-to-3D Measurement & Reconstruction)
 ```powershell
-python tests/test_headless_smoke.py
+powershell -ExecutionPolicy Bypass -File scripts/run_headless.ps1 `
+    -Script scripts/build_from_reference.py `
+    -OutDir outputs/coffee_mug `
+    -ScriptArgs @("--image", "outputs/Blender/Img/ref/Coffee Mug/777851637_900653342693059_575899448985784479_n.jpg")
+```
+
+### 4. รันชุดทดสอบคุณภาพ (Smoke & Unit Tests - 22 Checks)
+```powershell
+python -m unittest discover -s tests
 ```
 
 ---
