@@ -1,0 +1,16 @@
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Blender Output & Temporary Renderings
+out/
+renders/
+*.blend1
+*.blend2
+
+# Environment & Local Path Caches
+.env
+.capybala/
+blender_path.txt
